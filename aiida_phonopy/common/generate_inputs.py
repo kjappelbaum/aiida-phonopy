@@ -350,6 +350,169 @@ def generate_vasp_params(structure, settings, type=None, pressure=0.0):
     return VaspCalculation.process(), inputs
 
 
+def generate_cp2k_params(structure=None, settings=None, type=None, pressure=0.0):
+    """
+
+    :param structure: StructureData object containing the crystal structure
+    :param settings:  ParametersData object containing a dictionary with the cp2k parameters
+    :param type: String specifying the calculation type
+    :param pressure: Float specifying the pressure
+    :return: Calculation process object, input dictionary
+    """
+
+    # Generic code copied from other parts
+    try:
+        code = settings.dict.code[type]
+    except:
+        code = settings.dict.code
+
+    plugin = Code.get_from_string(code).get_attr('input_plugin')
+    cp2kcalculation = CalculationFactory(plugin)
+    inputs = cp2kcalculation.process().get_inputs_template()
+    inputs.code = Code.get_from_string(code)
+
+    inputs._options.resources = settings.dict.machine['resources']
+    inputs._options.max_wallclock_seconds = settings.dict.machine['max_wallclock_seconds']
+    if 'queue_name' in settings.get_dict()['machine']:
+        inputs._options.queue_name = settings.dict.machine['queue_name']
+    if 'import_sys_environment' in settings.get_dict()['machine']:
+        inputs._options.import_sys_environment = settings.dict.machine['import_sys_environment']
+
+    # input
+    cp2k_input = dict(settings.dict.parameters)
+
+    if type == 'forces':
+        cp2k_input.update(
+            {
+            'GLOBAL': {
+            'RUN_TYPE': 'ENERGY_FORCE',
+            'PRINT_LEVEL': 'MEDIUM',
+            'EXTENDED_FFT_LENGTHS': True,  # Needed for large systems
+            },
+            'FORCE_EVAL': {
+                'METHOD': 'QUICKSTEP',  # default: QS
+                'STRESS_TENSOR': 'ANALYTICAL',  # default: NONE
+                'DFT': {
+                    'MULTIPLICITY': 1,
+                    'UKS': False,
+                    'CHARGE': 0,
+                    'BASIS_SET_FILE_NAME': [
+                        'BASIS_MOLOPT',
+                        'BASIS_MOLOPT_UCL',
+                    ],
+                    'POTENTIAL_FILE_NAME': 'GTH_POTENTIALS',
+                    'RESTART_FILE_NAME': './parent_calc/aiida-RESTART.wfn',
+                    'QS': {
+                        'METHOD': 'GPW',
+                    },
+                    'POISSON': {
+                        'PERIODIC': 'XYZ',
+                    },
+                    'MGRID': {
+                        'CUTOFF': 600,
+                        'NGRIDS': 4,
+                        'REL_CUTOFF': 50,
+                    },
+                    'SCF': {
+                        'SCF_GUESS': 'ATOMIC',
+                        'EPS_SCF': 1.0e-6,
+                        'MAX_SCF': 50,
+                        'MAX_ITER_LUMO': 10000,  # needed for the bandgap
+                        'OT': {
+                            'MINIMIZER': 'DIIS',
+                            'PRECONDITIONER': 'FULL_ALL',
+                        },
+                        'OUTER_SCF': {
+                            'EPS_SCF': 1.0e-6,
+                            'MAX_SCF': 10,
+                        },
+                        'PRINT': {
+                            'RESTART': {
+                                'BACKUP_COPIES': 0,
+                                'EACH': {
+                                    'QS_SCF': 20,
+                                },
+                            },
+                            'RESTART_HISTORY': {
+                                '_': 'OFF'
+                            },
+                        },
+                    },
+                    'XC': {
+                        'XC_FUNCTIONAL': {
+                            '_': 'PBE',
+                        },
+                        'VDW_POTENTIAL': {
+                            'POTENTIAL_TYPE': 'PAIR_POTENTIAL',
+                            'PAIR_POTENTIAL': {
+                                'PARAMETER_FILE_NAME': 'dftd3.dat',
+                                'TYPE': 'DFTD3(BJ)',
+                                'REFERENCE_FUNCTIONAL': 'PBE',
+                            },
+                        },
+                    },
+                    'PRINT': {
+                        'E_DENSITY_CUBE': {
+                            '_': 'OFF',
+                            'STRIDE': '1 1 1',
+                        },
+                        'MO_CUBES': {
+                            '_': 'ON',  # this is to print the band gap
+                            'WRITE_CUBE': 'F',
+                            'STRIDE': '1 1 1',
+                            'NLUMO': 1,
+                            'NHOMO': 1,
+                        },
+                        'MULLIKEN': {
+                            '_': 'ON',  # default: ON
+                        },
+                        'LOWDIN': {
+                            '_': 'OFF',  # default: OFF
+                        },
+                        'HIRSHFELD': {
+                            '_': 'OFF',  # default: OFF
+                        },
+                    },
+                },
+                'SUBSYS': {
+                },
+                'PRINT': {
+                    'FORCES': {
+                        '_': 'ON',  # if you want: compute forces with RUN_TYPE ENERGY_FORCE and print them
+                    },
+                },
+            },
+        }
+        )
+        pass
+    elif type == 'dftb':
+        pass
+
+    inputs.parameters = ParameterData(dict=cp2k_input)
+
+
+    # KPOINTS
+    kpoints = KpointsData()
+    kpoints.set_cell_from_structure(structure)
+
+    if 'kpoints_density' in settings.get_dict():
+        kpoints.set_kpoints_mesh_from_density(settings.dict.kpoints_density)
+
+    elif 'kpoints_mesh' in settings.get_dict():
+        if 'kpoints_offset' in settings.get_dict():
+            kpoints_offset = settings.dict.kpoints_offset
+        else:
+            kpoints_offset = [0.0, 0.0, 0.0]
+
+        kpoints.set_kpoints_mesh(settings.dict.kpoints_mesh,
+                                 offset=kpoints_offset)
+    else:
+        raise InputValidationError('no kpoint definition in input. Define either kpoints_density or kpoints_mesh')
+
+
+    inputs.kpoints = kpoints
+
+
 def generate_inputs(structure, es_settings, type=None, pressure=0.0):
 
     try:
