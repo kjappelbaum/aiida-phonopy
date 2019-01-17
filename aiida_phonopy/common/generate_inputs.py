@@ -4,6 +4,7 @@
 
 from aiida.orm import Code, CalculationFactory, DataFactory
 from aiida.common.exceptions import InputValidationError
+from aiida_phonopy.common.atomic_convention1 import spin, basis_set, pseudo
 
 KpointsData = DataFactory("array.kpoints")
 ParameterData = DataFactory('parameter')
@@ -350,6 +351,24 @@ def generate_vasp_params(structure, settings, type=None, pressure=0.0):
     return VaspCalculation.process(), inputs
 
 
+def get_atom_kinds(structure):
+    """
+    Copied from AiiDA cp2k plugin
+    :param structure: StructureData object containing the crystal structure
+    :return: dictionary
+    """
+    kinds = []
+    all_atoms = set(structure.get_ase().get_chemical_symbols())
+    for a in all_atoms:
+        kinds.append({
+            '_': a,
+            'BASIS_SET': basis_set[a],
+            'POTENTIAL': pseudo[a],
+            'MAGNETIZATION': spin[a] * 2.0,
+            })
+    return kinds
+
+
 def generate_cp2k_params(structure=None, settings=None, type=None, pressure=0.0):
     """
 
@@ -487,6 +506,9 @@ def generate_cp2k_params(structure=None, settings=None, type=None, pressure=0.0)
         pass
     elif type == 'dftb':
         pass
+
+    kinds = get_atom_kinds(structure)
+    cp2k_input['FORCE_EVAL']['SUBSYS']['KIND'] = kinds
 
     inputs.parameters = ParameterData(dict=cp2k_input)
 
